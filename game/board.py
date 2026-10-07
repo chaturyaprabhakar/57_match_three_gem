@@ -22,6 +22,7 @@ class Gem:
         self.current_y = (target_row - 2) * TILE_SIZE
         self.target_y = target_row * TILE_SIZE
         self.fall_speed = 12.0
+        self.special = None
 
     def update(self):
         if self.current_y < self.target_y:
@@ -88,29 +89,50 @@ class Board:
         r2, c2 = pos2
         return abs(r1 - r2) + abs(c1 - c2) == 1
 
-    def find_matches(self):
+    def find_matches(self, track_specials=False):
         matched = set()
+        specials = {}
 
         for r in range(GRID_SIZE):
-            for c in range(GRID_SIZE - 2):
-                if (
-                    self.grid[r][c]
-                    and self.grid[r][c + 1]
-                    and self.grid[r][c + 2]
-                    and self.grid[r][c].color == self.grid[r][c + 1].color == self.grid[r][c + 2].color
-                ):
-                    matched.update([(r, c), (r, c + 1), (r, c + 2)])
+            c = 0
+            while c < GRID_SIZE:
+                gem = self.grid[r][c]
+                if gem is None:
+                    c += 1
+                    continue
+                color = gem.color
+                c2 = c
+                while c2 < GRID_SIZE and self.grid[r][c2] and self.grid[r][c2].color == color:
+                    c2 += 1
+                run_len = c2 - c
+                if run_len >= 3:
+                    positions = [(r, cc) for cc in range(c, c2)]
+                    matched.update(positions)
+                    if run_len >= 4:
+                        specials[positions[run_len // 2]] = 'row'
+                c = c2
 
-        for r in range(GRID_SIZE - 2):
-            for c in range(GRID_SIZE):
-                if (
-                    self.grid[r][c]
-                    and self.grid[r + 1][c]
-                    and self.grid[r + 2][c]
-                    and self.grid[r][c].color == self.grid[r + 1][c].color == self.grid[r + 2][c].color
-                ):
-                    matched.update([(r, c), (r + 1, c), (r + 2, c)])
+        for c in range(GRID_SIZE):
+            r = 0
+            while r < GRID_SIZE:
+                gem = self.grid[r][c]
+                if gem is None:
+                    r += 1
+                    continue
+                color = gem.color
+                r2 = r
+                while r2 < GRID_SIZE and self.grid[r2][c] and self.grid[r2][c].color == color:
+                    r2 += 1
+                run_len = r2 - r
+                if run_len >= 3:
+                    positions = [(rr, c) for rr in range(r, r2)]
+                    matched.update(positions)
+                    if run_len >= 4:
+                        specials[positions[run_len // 2]] = 'col'
+                r = r2
 
+        if track_specials:
+            return matched, specials
         return matched
 
     def drop_and_refill(self):
@@ -136,16 +158,49 @@ class Board:
         total_cleared = 0
         total_score = 0
         cascade_level = 0
+
         while True:
-            matches = self.find_matches()
-            if not matches:
+            matched, specials = self.find_matches(track_specials=True)
+            if not matched:
                 break
             cascade_level += 1
-            total_cleared += len(matches)
-            total_score += len(matches) * 10 * cascade_level
-            for r, c in matches:
-                self.grid[r][c] = None
+
+            expanded = set(matched)
+            queue = list(matched)
+            triggered = set()
+            while queue:
+                pos = queue.pop()
+                if pos in triggered:
+                    continue
+                gem = self.grid[pos[0]][pos[1]]
+                if gem and gem.special:
+                    triggered.add(pos)
+                    r, c = pos
+                    if gem.special == 'row':
+                        line = [(r, cc) for cc in range(GRID_SIZE) if self.grid[r][cc]]
+                    else:
+                        line = [(rr, c) for rr in range(GRID_SIZE) if self.grid[rr][c]]
+                    for p in line:
+                        if p not in expanded:
+                            expanded.add(p)
+                            queue.append(p)
+
+            for pos in specials:
+                expanded.discard(pos)
+
+            total_cleared += len(expanded)
+            total_score += len(expanded) * 10 * cascade_level
+
+            for pos in expanded:
+                self.grid[pos[0]][pos[1]] = None
+
+            for pos, orientation in specials.items():
+                gem = self.grid[pos[0]][pos[1]]
+                if gem:
+                    gem.special = orientation
+
             self.drop_and_refill()
+
         return total_cleared, total_score
 
     def process_swap(self, pos1, pos2):
@@ -199,6 +254,10 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), tile_rect, width=1, border_radius=10
                     )
+
+                    if gem.special:
+                        glow_color = (255, 230, 80) if gem.special == 'row' else (90, 230, 255)
+                        pygame.draw.rect(surface, glow_color, tile_rect, width=4, border_radius=10)
 
                 if self.selected == (r, c):
                     sel_x = self.offset_x + c * TILE_SIZE
