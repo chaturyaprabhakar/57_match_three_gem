@@ -1,5 +1,7 @@
 import random
 import pygame
+import math
+IDLE_HINT_MS = 5000
 
 GRID_SIZE = 8
 TILE_SIZE = 60
@@ -45,12 +47,16 @@ class Board:
         self.selected = None
         self.score = 0
         self.moves_remaining = max_moves
+        self.hint = None
+        self.last_action_time = pygame.time.get_ticks()
         self.reset()
 
     def reset(self):
         self.score = 0
         self.moves_remaining = self.max_moves
         self.selected = None
+        self.hint = None
+        self.last_action_time = pygame.time.get_ticks()
         for r in range(GRID_SIZE):
             for c in range(GRID_SIZE):
                 color = random.choice(GEM_COLORS)
@@ -59,6 +65,24 @@ class Board:
                 self.grid[r][c] = gem
 
         self.resolve_matches()
+
+    def register_input(self):
+        self.last_action_time = pygame.time.get_ticks()
+        self.hint = None
+
+    def find_hint(self):
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE):
+                for dr, dc in ((0, 1), (1, 0)):
+                    r2, c2 = r + dr, c + dc
+                    if r2 >= GRID_SIZE or c2 >= GRID_SIZE:
+                        continue
+                    self.swap_gems((r, c), (r2, c2))
+                    matched = self.find_matches()
+                    self.swap_gems((r, c), (r2, c2))
+                    if matched:
+                        return (r, c), (r2, c2)
+        return None
 
     def is_animating(self):
         for r in range(GRID_SIZE):
@@ -235,6 +259,11 @@ class Board:
                 if self.grid[r][c]:
                     self.grid[r][c].update()
 
+        if not self.is_game_over() and not self.is_animating():
+            idle_ms = pygame.time.get_ticks() - self.last_action_time
+            if idle_ms > IDLE_HINT_MS and self.hint is None:
+                self.hint = self.find_hint()
+
     def render(self, surface):
         board_rect = pygame.Rect(
             self.offset_x, self.offset_y, GRID_SIZE * TILE_SIZE, GRID_SIZE * TILE_SIZE
@@ -266,3 +295,17 @@ class Board:
                     pygame.draw.rect(
                         surface, (255, 255, 255), sel_rect, width=4, border_radius=10
                     )
+
+        if self.hint:
+            pulse = (math.sin(pygame.time.get_ticks() / 200.0) + 1) / 2
+            alpha = int(120 + 135 * pulse)
+            for (r, c) in self.hint:
+                x = self.offset_x + c * TILE_SIZE
+                y = self.offset_y + r * TILE_SIZE
+                hint_rect = pygame.Rect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4)
+                glow_surf = pygame.Surface((hint_rect.width, hint_rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(
+                    glow_surf, (255, 240, 150, alpha), glow_surf.get_rect(),
+                    width=5, border_radius=10
+                )
+                surface.blit(glow_surf, hint_rect.topleft)

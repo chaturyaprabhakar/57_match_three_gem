@@ -23,6 +23,7 @@ class GameEngine:
         by = my - self.board.offset_y
 
         if 0 <= bx < GRID_SIZE * TILE_SIZE and 0 <= by < GRID_SIZE * TILE_SIZE:
+            self.board.register_input()
             col = int(bx // TILE_SIZE)
             row = int(by // TILE_SIZE)
 
